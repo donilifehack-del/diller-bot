@@ -1,5 +1,4 @@
 import logging
-import asyncio
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ConversationHandler
@@ -17,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main():
+def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_handler.start))
@@ -65,8 +64,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$"))
 
     logger.info("Bot ishga tushdi...")
-    await app.run_polling(drop_pending_updates=True)
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
