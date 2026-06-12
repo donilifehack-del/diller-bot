@@ -207,7 +207,7 @@ async def order_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if d["ord_note"]:
         text += f"💬 Izoh: {d['ord_note']}\n"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Tasdiqlash", callback_data="ord_confirm_yes"),
+        [InlineKeyboardButton("✅ Tasdiqlash", callback_data="CONFIRM_ORDER"),
          InlineKeyboardButton("❌ Bekor qilish", callback_data="main_menu")]
     ])
     await update.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -255,5 +255,5 @@ STATES = {
     ORDER_DISCOUNT_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_discount_value)],
     ORDER_ENTER_PAID: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_enter_paid)],
     ORDER_NOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_note)],
-    ORDER_CONFIRM: [CallbackQueryHandler(order_confirm, pattern="^ord_confirm_yes$")],
+    ORDER_CONFIRM: [CallbackQueryHandler(order_confirm, pattern="^CONFIRM_ORDER$")],
 }
