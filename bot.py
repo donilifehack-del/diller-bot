@@ -19,10 +19,8 @@ logger = logging.getLogger(__name__)
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Start
     app.add_handler(CommandHandler("start", start_handler.start))
 
-    # Auth conversation
     auth_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(auth_handler.register_start, pattern="^auth_register$"),
@@ -34,7 +32,6 @@ def main():
     )
     app.add_handler(auth_conv)
 
-    # Shops
     shop_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(shops_handler.shops_menu, pattern="^shops$")],
         states=shops_handler.STATES,
@@ -43,7 +40,6 @@ def main():
     )
     app.add_handler(shop_conv)
 
-    # Products
     product_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(products_handler.products_menu, pattern="^products$")],
         states=products_handler.STATES,
@@ -52,7 +48,6 @@ def main():
     )
     app.add_handler(product_conv)
 
-    # Orders
     order_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(orders_handler.orders_menu, pattern="^orders$")],
         states=orders_handler.STATES,
@@ -61,7 +56,6 @@ def main():
     )
     app.add_handler(order_conv)
 
-    # Debtors
     debtor_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(debtors_handler.debtors_menu, pattern="^debtors$")],
         states=debtors_handler.STATES,
@@ -70,7 +64,6 @@ def main():
     )
     app.add_handler(debtor_conv)
 
-    # History
     history_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(history_handler.history_menu, pattern="^history$")],
         states=history_handler.STATES,
@@ -79,7 +72,6 @@ def main():
     )
     app.add_handler(history_conv)
 
-    # Main menu & logout
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^logout$"))
 
