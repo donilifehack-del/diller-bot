@@ -1,5 +1,5 @@
 import sqlite3
-import os
+import hashlib
 from datetime import datetime
 
 DB_PATH = "diller.db"
@@ -11,9 +11,25 @@ def get_conn():
     return conn
 
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
+
+    # Foydalanuvchilar
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            name TEXT NOT NULL,
+            telegram_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
 
     # Dokonlar
     cur.execute("""
@@ -46,10 +62,13 @@ def init_db():
             product_id INTEGER NOT NULL,
             quantity INTEGER NOT NULL,
             price REAL NOT NULL,
+            discount_type TEXT DEFAULT 'none',
+            discount_value REAL DEFAULT 0,
             total REAL NOT NULL,
             paid REAL DEFAULT 0,
             debt REAL DEFAULT 0,
             note TEXT,
+            created_by INTEGER,
             created_at TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (shop_id) REFERENCES shops(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
@@ -70,6 +89,47 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
+# ─── USERS ────────────────────────────────────────────────────────────────────
+
+def register_user(email, password, name):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO users (email, password, name) VALUES (?,?,?)",
+            (email.lower().strip(), hash_password(password), name.strip())
+        )
+        conn.commit()
+        return True, "OK"
+    except sqlite3.IntegrityError:
+        return False, "Bu email allaqachon ro'yxatdan o'tgan!"
+    finally:
+        conn.close()
+
+
+def login_user(email, password):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE email=? AND password=?",
+        (email.lower().strip(), hash_password(password))
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def update_telegram_id(user_id, telegram_id):
+    conn = get_conn()
+    conn.execute("UPDATE users SET telegram_id=? WHERE id=?", (telegram_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_user_by_id(user_id):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    return row
 
 
 # ─── SHOPS ────────────────────────────────────────────────────────────────────
@@ -139,7 +199,6 @@ def get_product(product_id):
 
 
 def update_product_quantity(product_id, delta):
-    """delta musbat = qo'shish, manfiy = ayirish"""
     conn = get_conn()
     conn.execute("UPDATE products SET quantity = quantity + ? WHERE id=?", (delta, product_id))
     conn.commit()
@@ -162,17 +221,27 @@ def delete_product(product_id):
 
 # ─── ORDERS ───────────────────────────────────────────────────────────────────
 
-def add_order(shop_id, product_id, quantity, price, paid=0, note=""):
-    total = quantity * price
-    debt = total - paid
+def add_order(shop_id, product_id, quantity, price, discount_type="none", discount_value=0, paid=0, note="", created_by=None):
+    original_total = quantity * price
+    if discount_type == "percent":
+        discount_amount = original_total * discount_value / 100
+    elif discount_type == "sum":
+        discount_amount = discount_value
+    else:
+        discount_amount = 0
+
+    total = max(0, original_total - discount_amount)
+    debt = max(0, total - paid)
+
     conn = get_conn()
     conn.execute(
-        "INSERT INTO orders (shop_id, product_id, quantity, price, total, paid, debt, note) VALUES (?,?,?,?,?,?,?,?)",
-        (shop_id, product_id, quantity, price, total, paid, debt, note)
+        """INSERT INTO orders 
+        (shop_id, product_id, quantity, price, discount_type, discount_value, total, paid, debt, note, created_by) 
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (shop_id, product_id, quantity, price, discount_type, discount_value, total, paid, debt, note, created_by)
     )
     conn.commit()
     conn.close()
-    # Tovar sonini kamaytir
     update_product_quantity(product_id, -quantity)
 
 
@@ -202,7 +271,6 @@ def get_orders(shop_id=None):
 # ─── DEBTORS ──────────────────────────────────────────────────────────────────
 
 def get_debtors():
-    """Qarzi bor dokonlar"""
     conn = get_conn()
     rows = conn.execute("""
         SELECT s.id, s.name, s.phone,
@@ -219,11 +287,11 @@ def get_debtors():
 
 
 def get_shop_debt_detail(shop_id):
-    """Bitta dokonning qarz tafsiloti"""
     conn = get_conn()
     rows = conn.execute("""
         SELECT o.id, o.created_at, p.name as product_name, p.unit,
-               o.quantity, o.price, o.total, o.paid, o.debt, o.note
+               o.quantity, o.price, o.discount_type, o.discount_value,
+               o.total, o.paid, o.debt, o.note
         FROM orders o
         JOIN products p ON o.product_id = p.id
         WHERE o.shop_id=? AND o.debt > 0
@@ -244,7 +312,6 @@ def get_shop_total_debt(shop_id):
 
 
 def add_payment(shop_id, amount, note=""):
-    """To'lov qabul qilish — eng eski qarzdан ayir"""
     conn = get_conn()
     remaining = amount
     orders = conn.execute(
@@ -256,10 +323,7 @@ def add_payment(shop_id, amount, note=""):
             break
         if remaining >= order["debt"]:
             remaining -= order["debt"]
-            conn.execute(
-                "UPDATE orders SET paid=paid+debt, debt=0 WHERE id=?",
-                (order["id"],)
-            )
+            conn.execute("UPDATE orders SET paid=paid+debt, debt=0 WHERE id=?", (order["id"],))
         else:
             conn.execute(
                 "UPDATE orders SET paid=paid+?, debt=debt-? WHERE id=?",
@@ -267,10 +331,7 @@ def add_payment(shop_id, amount, note=""):
             )
             remaining = 0
 
-    conn.execute(
-        "INSERT INTO payments (shop_id, amount, note) VALUES (?,?,?)",
-        (shop_id, amount, note)
-    )
+    conn.execute("INSERT INTO payments (shop_id, amount, note) VALUES (?,?,?)", (shop_id, amount, note))
     conn.commit()
     conn.close()
 
@@ -288,13 +349,13 @@ def get_payments(shop_id):
 # ─── HISTORY ──────────────────────────────────────────────────────────────────
 
 def get_daily_history(date_str=None):
-    """Kunlik tarix: date_str = 'YYYY-MM-DD', bo'lmasa bugun"""
     if not date_str:
         date_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_conn()
     rows = conn.execute("""
         SELECT o.created_at, s.name as shop_name, p.name as product_name, p.unit,
-               o.quantity, o.price, o.total, o.paid, o.debt, o.note
+               o.quantity, o.price, o.discount_type, o.discount_value,
+               o.total, o.paid, o.debt, o.note
         FROM orders o
         JOIN shops s ON o.shop_id = s.id
         JOIN products p ON o.product_id = p.id
@@ -306,7 +367,6 @@ def get_daily_history(date_str=None):
 
 
 def get_history_summary(date_str=None):
-    """Kunlik umumiy statistika"""
     if not date_str:
         date_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_conn()
@@ -324,7 +384,6 @@ def get_history_summary(date_str=None):
 
 
 def get_available_dates():
-    """Tarix mavjud bo'lgan sanalar"""
     conn = get_conn()
     rows = conn.execute(
         "SELECT DISTINCT DATE(created_at) as d FROM orders ORDER BY d DESC LIMIT 30"
