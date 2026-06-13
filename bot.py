@@ -72,6 +72,7 @@ def main():
     )
     app.add_handler(history_conv)
 
+    app.add_handler(CallbackQueryHandler(orders_handler.order_save, pattern="^ord_save$"))
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^logout$"))
 
