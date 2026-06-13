@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database import init_db, get_user_by_telegram_id
+from database import init_db, migrate_db, get_user_by_telegram_id
 
 init_db()
 migrate_db()
