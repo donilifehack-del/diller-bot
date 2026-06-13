@@ -39,7 +39,7 @@ async def orders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb, shops = shops_kb()
     if not shops:
         await query.edit_message_text(
-            "❌ Hech qanday dokon yo'q.",
+            "❌ Dokon yo'q.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Orqaga", callback_data="main_menu")]]))
         return ConversationHandler.END
     await query.edit_message_text("🛒 *Yangi buyurtma*\n\nQaysi dokonga?",
@@ -196,9 +196,6 @@ async def order_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if d["ord_note"]:
         text += f"💬 {d['ord_note']}\n"
 
-    # Tasdiqlash tugmasi bosilganda shu funksiya ichida saqlaymiz
-    context.user_data["ord_ready"] = True
-
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Tasdiqlash", callback_data="ord_save"),
          InlineKeyboardButton("❌ Bekor", callback_data="main_menu")]
@@ -209,7 +206,7 @@ async def order_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def order_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await query.answer("Saqlanmoqda...")
     d = context.user_data
 
     db.add_order(
