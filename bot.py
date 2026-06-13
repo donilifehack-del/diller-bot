@@ -21,6 +21,14 @@ def main():
 
     app.add_handler(CommandHandler("start", start_handler.start))
 
+    # Orders - oddiy handlerlar
+    app.add_handler(CallbackQueryHandler(orders_handler.orders_menu, pattern="^orders$"))
+    app.add_handler(CallbackQueryHandler(orders_handler.order_select_shop, pattern="^ord_shop_"))
+    app.add_handler(CallbackQueryHandler(orders_handler.order_select_product, pattern="^ord_prod_"))
+    app.add_handler(CallbackQueryHandler(orders_handler.order_discount_type, pattern="^disc_"))
+    app.add_handler(CallbackQueryHandler(orders_handler.order_save, pattern="^ord_save$"))
+
+    # Auth
     auth_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(auth_handler.register_start, pattern="^auth_register$"),
@@ -32,6 +40,7 @@ def main():
     )
     app.add_handler(auth_conv)
 
+    # Shops
     shop_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(shops_handler.shops_menu, pattern="^shops$")],
         states=shops_handler.STATES,
@@ -40,6 +49,7 @@ def main():
     )
     app.add_handler(shop_conv)
 
+    # Products
     product_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(products_handler.products_menu, pattern="^products$")],
         states=products_handler.STATES,
@@ -48,14 +58,7 @@ def main():
     )
     app.add_handler(product_conv)
 
-    order_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(orders_handler.orders_menu, pattern="^orders$")],
-        states=orders_handler.STATES,
-        fallbacks=[CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$")],
-        allow_reentry=True
-    )
-    app.add_handler(order_conv)
-
+    # Debtors
     debtor_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(debtors_handler.debtors_menu, pattern="^debtors$")],
         states=debtors_handler.STATES,
@@ -64,6 +67,7 @@ def main():
     )
     app.add_handler(debtor_conv)
 
+    # History
     history_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(history_handler.history_menu, pattern="^history$")],
         states=history_handler.STATES,
@@ -72,7 +76,9 @@ def main():
     )
     app.add_handler(history_conv)
 
-    app.add_handler(CallbackQueryHandler(orders_handler.order_save, pattern="^ord_save$"))
+    # Text handler - orders uchun
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler))
+
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^logout$"))
 
