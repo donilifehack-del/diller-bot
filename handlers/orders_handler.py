@@ -1,11 +1,19 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
 import database as db
 import logging
 
 logger = logging.getLogger(__name__)
 
 STATES = {}
+
+STEP_SHOP = 1
+STEP_PRODUCT = 2
+STEP_QTY = 3
+STEP_DISCOUNT = 4
+STEP_PAID = 5
+STEP_NOTE = 6
+STEP_CONFIRM = 7
 
 
 def shops_kb():
@@ -32,7 +40,7 @@ async def orders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("logged_in"):
         from handlers.auth_handler import auth_keyboard
         await query.edit_message_text("⚠️ Avval tizimga kiring!", reply_markup=auth_keyboard())
-        return
+        return ConversationHandler.END
     keys_to_remove = [k for k in list(context.user_data.keys()) if k.startswith("ord_")]
     for k in keys_to_remove:
         del context.user_data[k]
@@ -40,10 +48,10 @@ async def orders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not shops:
         await query.edit_message_text("❌ Dokon yo'q.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Orqaga", callback_data="main_menu")]]))
-        return
+        return ConversationHandler.END
     await query.edit_message_text("🛒 *Yangi buyurtma*\n\nQaysi dokonga?",
         reply_markup=kb, parse_mode="Markdown")
-    context.user_data["ord_step"] = "shop"
+    return STEP_SHOP
 
 
 async def order_select_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,10 +65,10 @@ async def order_select_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not available:
         await query.edit_message_text("❌ Omborda tovar yo'q.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Orqaga", callback_data="main_menu")]]))
-        return
+        return ConversationHandler.END
     await query.edit_message_text(f"🏪 *{shop['name']}*\n\nQaysi tovar?",
         reply_markup=kb, parse_mode="Markdown")
-    context.user_data["ord_step"] = "product"
+    return STEP_PRODUCT
 
 
 async def order_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,11 +81,42 @@ async def order_select_product(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["ord_prod_price"] = prod["price"]
     context.user_data["ord_prod_unit"] = prod["unit"]
     context.user_data["ord_prod_qty_avail"] = prod["quantity"]
-    context.user_data["ord_step"] = "qty"
     await query.edit_message_text(
         f"📦 *{prod['name']}*\n"
         f"💰 {prod['price']:,.0f} so'm | 📊 {prod['quantity']} {prod['unit']}\n\n"
         "Nechta yuborasiz?", parse_mode="Markdown")
+    return STEP_QTY
+
+
+async def order_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return STEP_QTY
+
+
+async def order_enter_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        qty = int(update.message.text.strip())
+        avail = context.user_data["ord_prod_qty_avail"]
+        if qty <= 0:
+            await update.message.reply_text("❌ 0 dan katta son kiriting:")
+            return STEP_QTY
+        if qty > avail:
+            await update.message.reply_text(f"❌ Faqat {avail} ta bor:")
+            return STEP_QTY
+        context.user_data["ord_qty"] = qty
+        context.user_data["ord_total_original"] = qty * context.user_data["ord_prod_price"]
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏷 Foizda (%)", callback_data="disc_percent")],
+            [InlineKeyboardButton("💵 So'mda", callback_data="disc_sum")],
+            [InlineKeyboardButton("❌ Skidkasiz", callback_data="disc_none")],
+        ])
+        await update.message.reply_text(
+            f"📊 {qty} {context.user_data['ord_prod_unit']} | "
+            f"💰 {context.user_data['ord_total_original']:,.0f} so'm\n\n🏷 Skidka?",
+            reply_markup=kb, parse_mode="Markdown")
+        return STEP_DISCOUNT
+    except ValueError:
+        await update.message.reply_text("❌ Butun son kiriting:")
+        return STEP_QTY
 
 
 async def order_discount_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,129 +127,98 @@ async def order_discount_type(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["ord_discount_type"] = "none"
         context.user_data["ord_discount_value"] = 0
         context.user_data["ord_total"] = context.user_data["ord_total_original"]
-        context.user_data["ord_step"] = "paid"
         await query.edit_message_text(
             f"💰 Jami: *{context.user_data['ord_total']:,.0f} so'm*\n\n"
             "Qancha to'landi? (qarz bo'lsa 0):", parse_mode="Markdown")
-        return
+        return STEP_PAID
     context.user_data["ord_discount_type"] = disc_type
-    context.user_data["ord_step"] = "discount_value"
     msg = "🏷 Necha foiz? (1-99):" if disc_type == "percent" else "💵 Necha so'm skidka?"
     await query.edit_message_text(msg)
+    return STEP_DISCOUNT
 
 
-async def order_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    step = context.user_data.get("ord_step")
-    if not step:
-        return
+async def order_discount_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        val = float(update.message.text.strip().replace(" ", "").replace(",", ""))
+        disc_type = context.user_data["ord_discount_type"]
+        original = context.user_data["ord_total_original"]
+        if disc_type == "percent":
+            if not (0 < val < 100):
+                await update.message.reply_text("❌ 1-99 orasida kiriting:")
+                return STEP_DISCOUNT
+            discount_amount = original * val / 100
+            disc_label = f"{val:.0f}%"
+        else:
+            if not (0 < val < original):
+                await update.message.reply_text(f"❌ 0 dan {original:,.0f} gacha:")
+                return STEP_DISCOUNT
+            discount_amount = val
+            disc_label = f"{val:,.0f} so'm"
+        context.user_data["ord_discount_value"] = val
+        context.user_data["ord_discount_label"] = disc_label
+        context.user_data["ord_total"] = original - discount_amount
+        await update.message.reply_text(
+            f"🏷 Skidka: *{disc_label}*\n💰 Yangi jami: *{context.user_data['ord_total']:,.0f} so'm*\n\n"
+            "Qancha to'landi? (qarz bo'lsa 0):", parse_mode="Markdown")
+        return STEP_PAID
+    except ValueError:
+        await update.message.reply_text("❌ Raqam kiriting:")
+        return STEP_DISCOUNT
 
-    text = update.message.text.strip()
 
-    if step == "qty":
-        try:
-            qty = int(text)
-            avail = context.user_data["ord_prod_qty_avail"]
-            if qty <= 0:
-                await update.message.reply_text("❌ 0 dan katta son kiriting:")
-                return
-            if qty > avail:
-                await update.message.reply_text(f"❌ Faqat {avail} ta bor:")
-                return
-            context.user_data["ord_qty"] = qty
-            context.user_data["ord_total_original"] = qty * context.user_data["ord_prod_price"]
-            context.user_data["ord_step"] = "discount"
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏷 Foizda (%)", callback_data="disc_percent")],
-                [InlineKeyboardButton("💵 So'mda", callback_data="disc_sum")],
-                [InlineKeyboardButton("❌ Skidkasiz", callback_data="disc_none")],
-            ])
-            await update.message.reply_text(
-                f"📊 {qty} {context.user_data['ord_prod_unit']} | "
-                f"💰 {context.user_data['ord_total_original']:,.0f} so'm\n\n🏷 Skidka?",
-                reply_markup=kb, parse_mode="Markdown")
-        except ValueError:
-            await update.message.reply_text("❌ Butun son kiriting:")
+async def order_enter_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        paid = float(update.message.text.strip().replace(" ", "").replace(",", ""))
+        total = context.user_data["ord_total"]
+        if paid < 0 or paid > total:
+            await update.message.reply_text(f"❌ 0 dan {total:,.0f} gacha kiriting:")
+            return STEP_PAID
+        context.user_data["ord_paid"] = paid
+        await update.message.reply_text("💬 Izoh ('-' o'tkazish):")
+        return STEP_NOTE
+    except ValueError:
+        await update.message.reply_text("❌ Raqam kiriting:")
+        return STEP_PAID
 
-    elif step == "discount_value":
-        try:
-            val = float(text.replace(" ", "").replace(",", ""))
-            disc_type = context.user_data["ord_discount_type"]
-            original = context.user_data["ord_total_original"]
-            if disc_type == "percent":
-                if not (0 < val < 100):
-                    await update.message.reply_text("❌ 1-99 orasida kiriting:")
-                    return
-                discount_amount = original * val / 100
-                disc_label = f"{val:.0f}%"
-            else:
-                if not (0 < val < original):
-                    await update.message.reply_text(f"❌ 0 dan {original:,.0f} gacha:")
-                    return
-                discount_amount = val
-                disc_label = f"{val:,.0f} so'm"
-            context.user_data["ord_discount_value"] = val
-            context.user_data["ord_discount_label"] = disc_label
-            context.user_data["ord_total"] = original - discount_amount
-            context.user_data["ord_step"] = "paid"
-            await update.message.reply_text(
-                f"🏷 Skidka: *{disc_label}*\n💰 Yangi jami: *{context.user_data['ord_total']:,.0f} so'm*\n\n"
-                "Qancha to'landi? (qarz bo'lsa 0):", parse_mode="Markdown")
-        except ValueError:
-            await update.message.reply_text("❌ Raqam kiriting:")
 
-    elif step == "paid":
-        try:
-            paid = float(text.replace(" ", "").replace(",", ""))
-            total = context.user_data["ord_total"]
-            if paid < 0 or paid > total:
-                await update.message.reply_text(f"❌ 0 dan {total:,.0f} gacha kiriting:")
-                return
-            context.user_data["ord_paid"] = paid
-            context.user_data["ord_step"] = "note"
-            await update.message.reply_text("💬 Izoh ('-' o'tkazish):")
-        except ValueError:
-            await update.message.reply_text("❌ Raqam kiriting:")
+async def order_enter_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    note = update.message.text.strip()
+    context.user_data["ord_note"] = "" if note == "-" else note
+    d = context.user_data
+    total = d["ord_total"]
+    original = d["ord_total_original"]
+    paid = d["ord_paid"]
+    debt = total - paid
+    disc_type = d.get("ord_discount_type", "none")
 
-    elif step == "note":
-        context.user_data["ord_note"] = "" if text == "-" else text
-        d = context.user_data
-        total = d["ord_total"]
-        original = d["ord_total_original"]
-        paid = d["ord_paid"]
-        debt = total - paid
-        disc_type = d.get("ord_discount_type", "none")
+    msg = (
+        f"📋 *Buyurtma tasdiqi*\n\n"
+        f"🏪 {d['ord_shop_name']}\n"
+        f"📦 {d['ord_prod_name']} × {d['ord_qty']} {d['ord_prod_unit']}\n"
+        f"💰 Narx: {d['ord_prod_price']:,.0f} so'm\n"
+    )
+    if disc_type != "none":
+        msg += f"🏷 Skidka: {d.get('ord_discount_label','')} (-{original-total:,.0f} so'm)\n"
+    msg += (
+        f"💵 Jami: *{total:,.0f} so'm*\n"
+        f"✅ To'langan: *{paid:,.0f} so'm*\n"
+        f"💸 Qarz: *{debt:,.0f} so'm*\n"
+    )
+    if d.get("ord_note"):
+        msg += f"💬 {d['ord_note']}\n"
 
-        msg = (
-            f"📋 *Buyurtma tasdiqi*\n\n"
-            f"🏪 {d['ord_shop_name']}\n"
-            f"📦 {d['ord_prod_name']} × {d['ord_qty']} {d['ord_prod_unit']}\n"
-            f"💰 Narx: {d['ord_prod_price']:,.0f} so'm\n"
-        )
-        if disc_type != "none":
-            msg += f"🏷 Skidka: {d.get('ord_discount_label','')} (-{original-total:,.0f} so'm)\n"
-        msg += (
-            f"💵 Jami: *{total:,.0f} so'm*\n"
-            f"✅ To'langan: *{paid:,.0f} so'm*\n"
-            f"💸 Qarz: *{debt:,.0f} so'm*\n"
-        )
-        if d.get("ord_note"):
-            msg += f"💬 {d['ord_note']}\n"
-
-        context.user_data["ord_step"] = "confirm"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Tasdiqlash", callback_data="ord_save"),
-             InlineKeyboardButton("❌ Bekor", callback_data="main_menu")]
-        ])
-        await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Tasdiqlash", callback_data="ord_save"),
+         InlineKeyboardButton("❌ Bekor", callback_data="main_menu")]
+    ])
+    await update.message.reply_text(msg, reply_markup=kb, parse_mode="Markdown")
+    return STEP_CONFIRM
 
 
 async def order_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     d = context.user_data
-
-    logger.info(f"order_save: step={d.get('ord_step')}, shop={d.get('ord_shop_name')}")
-
     try:
         db.add_order(
             shop_id=d["ord_shop_id"],
@@ -236,11 +244,10 @@ async def order_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         from handlers.start_handler import main_menu_keyboard
         await query.edit_message_text(msg, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
-
         keys_to_remove = [k for k in list(d.keys()) if k.startswith("ord_")]
         for k in keys_to_remove:
             del context.user_data[k]
-
     except Exception as e:
         logger.error(f"order_save error: {e}", exc_info=True)
         await query.edit_message_text(f"❌ Xato: {str(e)}")
+    return ConversationHandler.END

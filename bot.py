@@ -21,12 +21,24 @@ def main():
 
     app.add_handler(CommandHandler("start", start_handler.start))
 
-    # Orders - oddiy handlerlar
-    app.add_handler(CallbackQueryHandler(orders_handler.orders_menu, pattern="^orders$"))
-    app.add_handler(CallbackQueryHandler(orders_handler.order_select_shop, pattern="^ord_shop_"))
-    app.add_handler(CallbackQueryHandler(orders_handler.order_select_product, pattern="^ord_prod_"))
-    app.add_handler(CallbackQueryHandler(orders_handler.order_discount_type, pattern="^disc_"))
-    app.add_handler(CallbackQueryHandler(orders_handler.order_save, pattern="^ord_save$"))
+    # Orders - to'liq ConversationHandler ICHIDA
+    order_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(orders_handler.orders_menu, pattern="^orders$")],
+        states={
+            1: [CallbackQueryHandler(orders_handler.order_select_shop, pattern="^ord_shop_")],
+            2: [CallbackQueryHandler(orders_handler.order_select_product, pattern="^ord_prod_")],
+            3: [MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler)],
+            4: [CallbackQueryHandler(orders_handler.order_discount_type, pattern="^disc_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler)],
+            5: [MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler)],
+            6: [MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler)],
+            7: [CallbackQueryHandler(orders_handler.order_save, pattern="^ord_save$"),
+                CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$")],
+        },
+        fallbacks=[CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$")],
+        allow_reentry=True
+    )
+    app.add_handler(order_conv)
 
     # Auth
     auth_conv = ConversationHandler(
@@ -75,9 +87,6 @@ def main():
         allow_reentry=True
     )
     app.add_handler(history_conv)
-
-    # Text handler - orders uchun
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, orders_handler.order_text_handler))
 
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(start_handler.back_to_main, pattern="^logout$"))
