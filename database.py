@@ -390,3 +390,12 @@ def get_available_dates():
     ).fetchall()
     conn.close()
     return [r["d"] for r in rows]
+
+
+def get_user_by_telegram_id(telegram_id):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE telegram_id=?", (telegram_id,)
+    ).fetchone()
+    conn.close()
+    return row
