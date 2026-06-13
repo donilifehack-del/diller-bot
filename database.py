@@ -399,3 +399,22 @@ def get_user_by_telegram_id(telegram_id):
     ).fetchone()
     conn.close()
     return row
+
+
+def migrate_db():
+    """Eski DB ga yangi ustunlarni qo'shish"""
+    conn = get_conn()
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN discount_type TEXT DEFAULT 'none'")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN discount_value REAL DEFAULT 0")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE orders ADD COLUMN created_by INTEGER")
+    except:
+        pass
+    conn.commit()
+    conn.close()

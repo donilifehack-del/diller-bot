@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 from database import init_db, get_user_by_telegram_id
 
 init_db()
+migrate_db()
 
 
 def main_menu_keyboard():
